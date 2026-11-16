@@ -1,13 +1,17 @@
 [project]
 name = "mistral-iw"
 version = "0.1.0"
-description = "Add your description here"
+description = "AI weather agent (Mistral function calling) with a chat UI and tracing"
 readme = "README.md"
 authors = [
     { email = "augustinhourquet@icloud.com" }
 ]
 requires-python = ">=3.14"
-dependencies = []
+dependencies = [
+    "fastapi>=0.163.1",
+    "httpx>=0.28.1",
+    "uvicorn>=0.54.0",
+]
 
 [project.scripts]
 mistral-iw = "mistral_iw:main"
@@ -15,3 +19,12 @@ mistral-iw = "mistral_iw:main"
 [build-system]
 requires = ["uv_build>=0.12.15,<0.13.0"]
 build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore:Using `httpx` with `starlette.testclient`"]

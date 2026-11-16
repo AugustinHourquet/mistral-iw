@@ -1,0 +1,547 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Weather Agent</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⛅</text></svg>">
+<style>
+:root {
+  --bg: #f6f7f9; --surface: #ffffff; --surface-2: #f0f2f5; --border: #e3e6eb;
+  --text: #16181d; --muted: #646b78; --accent: #ff6a1a; --accent-ink: #ffffff;
+  --user-bg: #16181d; --user-ink: #ffffff;
+  --llm: #6d5dfc; --llm-soft: #c9c3fe; --tool: #0f9d8a; --tool-soft: #a6e3d9;
+  --danger: #d93a3a; --danger-soft: #fde8e8; --warn-soft: #fff4dc; --warn: #a86500;
+  --shadow: 0 10px 30px rgba(20, 24, 33, .12);
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --j-key: #7a3fd1; --j-str: #0b7a5a; --j-num: #c24f00; --j-lit: #2a62c9;
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --bg: #0f1115; --surface: #171a20; --surface-2: #1e222a; --border: #2a2f39;
+  --text: #e8eaee; --muted: #9aa1ad; --accent: #ff7a33; --accent-ink: #14100c;
+  --user-bg: #e8eaee; --user-ink: #14161a;
+  --llm: #8f84ff; --llm-soft: #3c3672; --tool: #2cc4ad; --tool-soft: #18524a;
+  --danger: #ff6b6b; --danger-soft: #3a1d20; --warn-soft: #3a2e14; --warn: #f2b94b;
+  --shadow: 0 10px 30px rgba(0, 0, 0, .45);
+  --j-key: #c3a6ff; --j-str: #7ee0b5; --j-num: #ffb36b; --j-lit: #8ab4ff;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1115; --surface: #171a20; --surface-2: #1e222a; --border: #2a2f39;
+    --text: #e8eaee; --muted: #9aa1ad; --accent: #ff7a33; --accent-ink: #14100c;
+    --user-bg: #e8eaee; --user-ink: #14161a;
+    --llm: #8f84ff; --llm-soft: #3c3672; --tool: #2cc4ad; --tool-soft: #18524a;
+    --danger: #ff6b6b; --danger-soft: #3a1d20; --warn-soft: #3a2e14; --warn: #f2b94b;
+    --shadow: 0 10px 30px rgba(0, 0, 0, .45);
+    --j-key: #c3a6ff; --j-str: #7ee0b5; --j-num: #ffb36b; --j-lit: #8ab4ff;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg); color: var(--text);
+  font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+  display: flex; flex-direction: column;
+}
+button { font: inherit; color: inherit; cursor: pointer; }
+.icon-btn {
+  background: transparent; border: 1px solid var(--border); border-radius: 10px;
+  height: 36px; min-width: 36px; padding: 0 12px; display: inline-flex; align-items: center; gap: 6px;
+}
+.icon-btn:hover { background: var(--surface-2); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Header */
+header {
+  display: flex; align-items: center; gap: 12px; padding: 12px 20px;
+  border-bottom: 1px solid var(--border); background: var(--surface);
+}
+.brand { display: flex; align-items: center; gap: 10px; font-weight: 650; letter-spacing: -.01em; }
+.brand .logo { font-size: 22px; }
+.model-pill { font: 12px var(--mono); color: var(--muted); border: 1px solid var(--border); border-radius: 999px; padding: 2px 9px; }
+.spacer { flex: 1; }
+.banner { background: var(--warn-soft); color: var(--warn); padding: 8px 20px; font-size: 14px; border-bottom: 1px solid var(--border); }
+
+/* Chat */
+main { flex: 1; overflow-y: auto; }
+.chat { max-width: 760px; margin: 0 auto; padding: 24px 16px 12px; display: flex; flex-direction: column; gap: 14px; }
+.empty { text-align: center; padding: 10vh 8px 0; }
+.empty h1 { font-size: 26px; letter-spacing: -.02em; margin: 0 0 6px; }
+.empty p { color: var(--muted); margin: 0 0 22px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+.chip {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 999px;
+  padding: 8px 14px; font-size: 14px;
+}
+.chip:hover { border-color: var(--accent); }
+.msg { display: flex; flex-direction: column; max-width: 85%; }
+.msg.user { align-self: flex-end; align-items: flex-end; }
+.msg.bot { align-self: flex-start; }
+.bubble { padding: 10px 14px; border-radius: 16px; overflow-wrap: anywhere; }
+.user .bubble { background: var(--user-bg); color: var(--user-ink); border-bottom-right-radius: 4px; white-space: pre-wrap; }
+.bot .bubble { background: var(--surface); border: 1px solid var(--border); border-bottom-left-radius: 4px; }
+.bot.error .bubble { background: var(--danger-soft); border-color: transparent; color: var(--danger); }
+.bubble p { margin: 0 0 8px; } .bubble p:last-child { margin-bottom: 0; }
+.bubble ul, .bubble ol { margin: 4px 0 8px; padding-left: 20px; }
+.bubble code { font: 13px var(--mono); background: var(--surface-2); padding: 1px 5px; border-radius: 5px; }
+.meta { font-size: 12.5px; color: var(--muted); margin-top: 5px; padding-left: 4px; display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.link { background: none; border: 0; padding: 0; color: var(--accent); font-weight: 550; }
+.link:hover { text-decoration: underline; }
+.typing .bubble { display: inline-flex; gap: 5px; padding: 14px 16px; }
+.typing span { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); animation: blink 1.2s infinite ease-in-out; }
+.typing span:nth-child(2) { animation-delay: .15s; } .typing span:nth-child(3) { animation-delay: .3s; }
+@keyframes blink { 0%, 80%, 100% { opacity: .25; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-3px); } }
+
+/* Composer */
+.composer-wrap { border-top: 1px solid var(--border); background: var(--surface); padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); }
+form.composer { max-width: 760px; margin: 0 auto; display: flex; gap: 8px; align-items: flex-end; }
+textarea {
+  flex: 1; resize: none; max-height: 160px; min-height: 44px; padding: 11px 14px;
+  font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 12px;
+}
+textarea:focus { outline: none; border-color: var(--accent); }
+.send { height: 44px; padding: 0 18px; border: 0; border-radius: 12px; background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.send:disabled { opacity: .5; cursor: default; }
+
+/* Trace panel */
+.backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, .3); opacity: 0; pointer-events: none; transition: opacity .2s; }
+.backdrop.open { opacity: 1; pointer-events: auto; }
+aside.panel {
+  position: fixed; top: 0; right: 0; bottom: 0; width: min(620px, 100vw);
+  background: var(--surface); border-left: 1px solid var(--border); box-shadow: var(--shadow);
+  transform: translateX(100%); transition: transform .22s ease; display: flex; flex-direction: column; z-index: 10;
+}
+aside.panel.open { transform: none; }
+.panel-head { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.panel-head h2 { font-size: 16px; margin: 0; flex: 1; }
+.view { flex: 1; overflow-y: auto; padding: 16px; }
+.view[hidden] { display: none; }
+
+.kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 6px; }
+.kpi { background: var(--surface-2); border-radius: 10px; padding: 9px 11px; min-width: 0; }
+.kpi .label { font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kpi .value { font-size: 18px; font-weight: 650; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
+.kpi-note { font-size: 12px; color: var(--muted); margin: 0 0 14px; }
+.filter { width: 100%; padding: 9px 12px; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 12px; }
+.filter:focus { outline: none; border-color: var(--accent); }
+.day { position: sticky; top: -16px; background: var(--surface); padding: 8px 0 6px; font-size: 12px; font-weight: 650; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); display: flex; justify-content: space-between; z-index: 1; }
+.trace-item {
+  display: block; width: 100%; text-align: left; background: transparent; border: 1px solid var(--border);
+  border-radius: 10px; padding: 10px 12px; margin-bottom: 8px;
+}
+.trace-item:hover { border-color: var(--accent); background: var(--surface-2); }
+.ti-top { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); }
+.ti-id { font-family: var(--mono); font-size: 12px; }
+.ti-q { margin: 3px 0; font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ti-stats { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.badge { font-size: 11px; font-weight: 650; border-radius: 6px; padding: 1px 7px; }
+.badge.err { background: var(--danger-soft); color: var(--danger); }
+.badge.warn { background: var(--warn-soft); color: var(--warn); }
+.muted { color: var(--muted); }
+.empty-list { text-align: center; color: var(--muted); padding: 40px 0; }
+
+/* Trace detail */
+.td-q { font-size: 17px; font-weight: 650; margin: 0 0 4px; }
+.td-a { color: var(--muted); margin: 0 0 12px; font-size: 14px; }
+.td-a p { margin: 0 0 4px; } .td-a ul { margin: 0 0 4px; padding-left: 20px; }
+.td-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+.tag { font-size: 12px; background: var(--surface-2); border-radius: 6px; padding: 2px 8px; font-variant-numeric: tabular-nums; }
+.tag b { font-weight: 600; }
+.err-box { background: var(--danger-soft); color: var(--danger); border-radius: 10px; padding: 8px 12px; font-size: 14px; margin-bottom: 12px; }
+.legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); margin-bottom: 8px; flex-wrap: wrap; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+details.span { border-top: 1px solid var(--border); }
+details.span:last-child { border-bottom: 1px solid var(--border); }
+details.span > summary { list-style: none; cursor: pointer; display: grid; grid-template-columns: 150px 1fr 64px; gap: 10px; align-items: center; padding: 8px 4px; }
+details.span > summary::-webkit-details-marker { display: none; }
+details.span > summary:hover { background: var(--surface-2); }
+.sp-name { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 13px; }
+.sp-name span:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kind { font: 600 10px var(--mono); text-transform: uppercase; padding: 1px 5px; border-radius: 4px; color: #fff; flex: none; }
+.kind.llm { background: var(--llm); } .kind.tool { background: var(--tool); }
+.track { position: relative; height: 14px; background: var(--surface-2); border-radius: 4px; }
+.bar { position: absolute; top: 0; bottom: 0; border-radius: 4px; min-width: 2px; display: flex; overflow: hidden; }
+.bar.llm { background: var(--llm); } .bar.tool { background: var(--tool); }
+.bar .ttft { background: var(--llm-soft); height: 100%; }
+.bar.error { box-shadow: 0 0 0 2px var(--danger); }
+.sp-dur { font-size: 12.5px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+.sp-body { padding: 4px 4px 12px; }
+.sp-body .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.sp-body details { margin-top: 6px; }
+.sp-body details > summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--muted); }
+pre.json {
+  margin: 6px 0 0; padding: 10px 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+  font: 12px/1.5 var(--mono); overflow: auto; max-height: 360px; white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.j-key { color: var(--j-key); } .j-str { color: var(--j-str); } .j-num { color: var(--j-num); } .j-lit { color: var(--j-lit); }
+
+@media (max-width: 600px) {
+  header { padding: 10px 16px; }
+  .model-pill, .btn-label { display: none; }
+  .msg { max-width: 92%; }
+  .kpis { grid-template-columns: repeat(2, 1fr); }
+  details.span > summary { grid-template-columns: 110px 1fr 56px; gap: 8px; }
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><span class="logo">⛅</span><span>Weather Agent</span></div>
+  <span class="model-pill" id="model">…</span>
+  <div class="spacer"></div>
+  <button class="icon-btn" id="new-btn" title="New chat" aria-label="New chat">＋<span class="btn-label">New chat</span></button>
+  <button class="icon-btn" id="theme-btn" title="Toggle theme" aria-label="Toggle theme">◐</button>
+  <button class="icon-btn" id="traces-btn" aria-label="Open traces">☰ Traces</button>
+</header>
+<div class="banner" id="banner" hidden></div>
+
+<main id="scroller">
+  <div class="chat" id="chat">
+    <div class="empty" id="empty">
+      <h1>Ask about the weather</h1>
+      <p>Anywhere in the world, in any language. Live data from Open-Meteo.</p>
+      <div class="chips">
+        <button class="chip">Hey, how cold is it in Paris?</button>
+        <button class="chip">Will it rain in New York tomorrow?</button>
+        <button class="chip">Quel temps fera-t-il à Lyon ce week-end ?</button>
+      </div>
+    </div>
+  </div>
+</main>
+
+<div class="composer-wrap">
+  <form class="composer" id="composer">
+    <textarea id="input" rows="1" placeholder="Ask about the weather anywhere…" aria-label="Message" autofocus></textarea>
+    <button class="send" id="send" type="submit">Send</button>
+  </form>
+</div>
+
+<div class="backdrop" id="backdrop"></div>
+<aside class="panel" id="panel" aria-label="Traces" aria-hidden="true" inert>
+  <div class="panel-head">
+    <button class="icon-btn" id="back-btn" hidden>← All traces</button>
+    <h2 id="panel-title">Traces</h2>
+    <button class="icon-btn" id="refresh-btn" title="Refresh" aria-label="Refresh traces">↻</button>
+    <button class="icon-btn" id="close-btn" aria-label="Close traces">✕</button>
+  </div>
+  <section class="view" id="list-view">
+    <div class="kpis" id="kpis"></div>
+    <p class="kpi-note" id="kpi-note"></p>
+    <input class="filter" id="filter" type="search" placeholder="Filter by question, answer, id, error…" aria-label="Filter traces">
+    <div id="trace-list"></div>
+  </section>
+  <section class="view" id="detail-view" hidden></section>
+</aside>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const state = { history: [], busy: false, traces: [], listScroll: 0, panelView: 'list' };
+
+/* ---------- formatting ---------- */
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const fmtMs = (ms) => ms == null || isNaN(ms) ? '–' : ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(ms < 10000 ? 2 : 1)} s`;
+const fmtInt = (n) => n == null || isNaN(n) ? '–' : Math.round(n).toLocaleString();
+const fmtTpot = (ms) => ms == null || isNaN(ms) ? '–' : `${ms.toFixed(1)} ms`;
+const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+
+function markdown(src) {
+  const inline = (s) => esc(s)
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/(^|[^*])\*([^*\s][^*]*)\*/g, '$1<em>$2</em>');
+  const out = []; let list = null;
+  for (const raw of String(src).split('\n')) {
+    const line = raw.trimEnd();
+    const m = line.match(/^\s*(?:([-*•])|(\d+)[.)])\s+(.*)$/);
+    if (m) {
+      const type = m[1] ? 'ul' : 'ol';
+      if (list !== type) { if (list) out.push(`</${list}>`); out.push(`<${type}>`); list = type; }
+      out.push(`<li>${inline(m[3])}</li>`);
+      continue;
+    }
+    if (list) { out.push(`</${list}>`); list = null; }
+    if (line.trim()) out.push(`<p>${inline(line.replace(/^#{1,6}\s+/, ''))}</p>`);
+  }
+  if (list) out.push(`</${list}>`);
+  return out.join('');
+}
+
+function jsonHtml(value) {
+  const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+  return esc(text).replace(
+    /(&quot;(?:\\.|[^&]|&(?!quot;))*?&quot;)(\s*:)?|\b(true|false|null)\b|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g,
+    (m, str, colon, lit, num) =>
+      str ? `<span class="${colon ? 'j-key' : 'j-str'}">${str}</span>${colon || ''}`
+        : lit ? `<span class="j-lit">${lit}</span>` : `<span class="j-num">${num}</span>`);
+}
+
+/* ---------- theme ---------- */
+function applyTheme(t) { if (t) document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme; }
+try { applyTheme(localStorage.getItem('theme')); } catch {}
+$('theme-btn').onclick = () => {
+  const dark = document.documentElement.dataset.theme
+    ? document.documentElement.dataset.theme === 'dark'
+    : matchMedia('(prefers-color-scheme: dark)').matches;
+  const next = dark ? 'light' : 'dark';
+  applyTheme(next);
+  try { localStorage.setItem('theme', next); } catch {}
+};
+
+/* ---------- health ---------- */
+fetch('/api/health').then((r) => r.json()).then((h) => {
+  $('model').textContent = h.model;
+  if (!h.api_key_set) {
+    $('banner').hidden = false;
+    $('banner').textContent = 'MISTRAL_API_KEY is not set. Add it to .env and restart the server.';
+  }
+}).catch(() => { $('model').textContent = 'offline'; });
+
+/* ---------- chat ---------- */
+const chat = $('chat'), input = $('input');
+const emptyHtml = $('empty').outerHTML;
+
+function newChat() {
+  state.abort?.abort();  // drop any answer still in flight
+  state.history = [];
+  state.busy = false; $('send').disabled = false;
+  chat.innerHTML = emptyHtml;
+  input.value = ''; autosize(); input.focus();
+}
+$('new-btn').onclick = newChat;
+
+function scrollDown() { $('scroller').scrollTop = $('scroller').scrollHeight; }
+
+function addMessage(role, html, cls = '') {
+  $('empty')?.remove();
+  const el = document.createElement('div');
+  el.className = `msg ${role} ${cls}`;
+  el.innerHTML = `<div class="bubble">${html}</div>`;
+  chat.appendChild(el);
+  scrollDown();
+  return el;
+}
+
+function addAnswer(answer, trace) {
+  const el = addMessage('bot', markdown(answer), trace.error ? 'error' : '');
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  meta.innerHTML = `<span>${plural(trace.tool_calls, 'tool call')}</span><span>${fmtMs(trace.latency_ms)}</span>`
+    + `<span>${fmtInt(trace.total_tokens)} tokens</span>`;
+  const link = document.createElement('button');
+  link.className = 'link'; link.textContent = 'view trace';
+  link.onclick = () => openPanel(trace);
+  meta.appendChild(link);
+  el.appendChild(meta);
+  scrollDown();
+}
+
+async function send(text) {
+  text = text.trim();
+  if (!text || state.busy) return;
+  state.busy = true; $('send').disabled = true;
+  input.value = ''; autosize();
+  addMessage('user', esc(text));
+  const typing = addMessage('bot', '<span></span><span></span><span></span>', 'typing');
+  const ctrl = state.abort = new AbortController();
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text, history: state.history.slice(-20) }),
+      signal: ctrl.signal,
+    });
+    const body = await res.json().catch(() => ({}));
+    if (ctrl.signal.aborted) return;  // a new chat was started meanwhile
+    typing.remove();
+    if (!res.ok) throw new Error(typeof body.detail === 'string' ? body.detail : `HTTP ${res.status}`);
+    addAnswer(body.answer, body.trace);
+    state.history.push({ role: 'user', content: text }, { role: 'assistant', content: body.answer });
+    if ($('panel').classList.contains('open') && state.panelView === 'list') loadTraces();
+  } catch (err) {
+    if (ctrl.signal.aborted) return;
+    typing.remove();
+    addMessage('bot', esc(`Error: ${err.message}`), 'error');
+  } finally {
+    if (!ctrl.signal.aborted) { state.busy = false; $('send').disabled = false; input.focus(); }
+  }
+}
+
+function autosize() { input.style.height = 'auto'; input.style.height = `${Math.min(input.scrollHeight, 160)}px`; }
+input.addEventListener('input', autosize);
+input.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(input.value); }
+});
+$('composer').addEventListener('submit', (e) => { e.preventDefault(); send(input.value); });
+// Delegated, so the chips keep working after a new chat re-renders them.
+chat.addEventListener('click', (e) => { const c = e.target.closest('.chip'); if (c) send(c.textContent); });
+
+/* ---------- trace panel ---------- */
+function openPanel(trace) {
+  $('panel').classList.add('open'); $('panel').setAttribute('aria-hidden', 'false'); $('panel').inert = false;
+  $('backdrop').classList.add('open');
+  loadTraces();
+  if (trace) showDetail(trace); else showList();
+}
+function closePanel() {
+  $('panel').classList.remove('open'); $('panel').setAttribute('aria-hidden', 'true'); $('panel').inert = true;
+  $('backdrop').classList.remove('open');
+}
+$('traces-btn').onclick = () => openPanel();
+$('close-btn').onclick = closePanel;
+$('backdrop').onclick = closePanel;
+$('back-btn').onclick = showList;
+$('refresh-btn').onclick = loadTraces;
+$('filter').addEventListener('input', renderList);
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || !$('panel').classList.contains('open')) return;
+  if (state.panelView === 'detail') showList(); else closePanel();
+});
+
+async function loadTraces() {
+  try {
+    const res = await fetch('/api/traces');
+    state.traces = res.ok ? await res.json() : [];
+  } catch { state.traces = []; }
+  if (state.panelView === 'list') {
+    const keep = $('list-view').scrollTop;
+    renderList();
+    $('list-view').scrollTop = keep;
+  }
+}
+
+function showList() {
+  state.panelView = 'list';
+  $('detail-view').hidden = true; $('list-view').hidden = false;
+  $('back-btn').hidden = true; $('refresh-btn').hidden = false; $('panel-title').hidden = false;
+  renderList();
+  $('list-view').scrollTop = state.listScroll;
+}
+
+function filtered() {
+  const q = $('filter').value.trim().toLowerCase();
+  if (!q) return state.traces;
+  return state.traces.filter((t) =>
+    [t.question, t.answer, t.id, t.model, t.error, t.started_at].some((v) => String(v ?? '').toLowerCase().includes(q)));
+}
+
+function percentile(values, p) {
+  const v = values.filter((x) => x != null && !isNaN(x)).sort((a, b) => a - b);
+  if (!v.length) return null;
+  const i = (v.length - 1) * p, lo = Math.floor(i), hi = Math.ceil(i);
+  return v[lo] + (v[hi] - v[lo]) * (i - lo);
+}
+const mean = (values) => {
+  const v = values.filter((x) => x != null && !isNaN(x));
+  return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
+};
+
+function renderKpis(traces) {
+  const ok = traces.filter((t) => !t.error);
+  const kpis = [
+    ['Avg TTFT', fmtMs(mean(traces.map((t) => t.ttft_ms))), 'Mean time to first token per LLM call'],
+    ['p95 TTFT', fmtMs(percentile(traces.map((t) => t.ttft_ms), .95)), '95th percentile of per-trace mean TTFT'],
+    ['Avg TPOT', fmtTpot(mean(traces.map((t) => t.tpot_ms))), 'Time per output token after the first'],
+    ['Tokens / answer', fmtInt(mean(ok.map((t) => t.total_tokens))), 'Mean total tokens (prompt + completion) per successful answer'],
+    ['p50 latency', fmtMs(percentile(traces.map((t) => t.latency_ms), .5)), 'Median total response time'],
+    ['p95 latency', fmtMs(percentile(traces.map((t) => t.latency_ms), .95)), '95th percentile total response time'],
+    ['Avg tool calls', traces.length ? (mean(traces.map((t) => t.tool_calls)) ?? 0).toFixed(1) : '–', 'Tool calls per question'],
+    ['Error rate', traces.length ? `${((traces.length - ok.length) / traces.length * 100).toFixed(0)}%` : '–', 'Share of traces that ended in an error'],
+  ];
+  $('kpis').innerHTML = kpis.map(([l, v, title]) =>
+    `<div class="kpi" title="${esc(title)}"><div class="label">${l}</div><div class="value">${v}</div></div>`).join('');
+  const all = state.traces.length;
+  $('kpi-note').textContent = !all ? '' : traces.length === all
+    ? `Across all ${plural(all, 'trace')}.` : `Across ${traces.length} of ${plural(all, 'trace')} matching the filter.`;
+}
+
+function dayLabel(day) {
+  const d = new Date(), iso = (x) => `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+  if (day === iso(d)) return 'Today';
+  d.setDate(d.getDate() - 1);
+  if (day === iso(d)) return 'Yesterday';
+  return new Date(`${day}T12:00:00`).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function renderList() {
+  const traces = filtered();
+  renderKpis(traces);
+  const box = $('trace-list');
+  if (!traces.length) {
+    box.innerHTML = `<div class="empty-list">${state.traces.length ? 'No trace matches the filter.' : 'No traces yet. Ask a question!'}</div>`;
+    return;
+  }
+  const groups = new Map();
+  for (const t of traces) {
+    const day = t.started_at.slice(0, 10);
+    if (!groups.has(day)) groups.set(day, []);
+    groups.get(day).push(t);
+  }
+  box.innerHTML = [...groups].map(([day, items]) =>
+    `<div class="day"><span>${esc(dayLabel(day))}</span><span>${items.length}</span></div>` + items.map((t) => `
+      <button class="trace-item" data-id="${esc(t.id)}">
+        <div class="ti-top"><span>${esc(t.started_at.slice(11, 19))}</span><span class="ti-id">${esc(t.id)}</span>
+          ${t.error ? '<span class="badge err">error</span>' : t.span_errors ? `<span class="badge warn">${plural(t.span_errors, 'tool error')}</span>` : ''}</div>
+        <div class="ti-q">${esc(t.question)}</div>
+        <div class="ti-stats"><span>${fmtMs(t.latency_ms)}</span><span>${plural(t.llm_calls, 'LLM call')}</span>
+          <span>${plural(t.tool_calls, 'tool call')}</span><span>${fmtInt(t.total_tokens)} tokens</span></div>
+      </button>`).join('')).join('');
+  box.querySelectorAll('.trace-item').forEach((b) => b.addEventListener('click', () => openTrace(b.dataset.id)));
+}
+
+async function openTrace(id) {
+  state.listScroll = $('list-view').scrollTop;
+  const res = await fetch(`/api/traces/${encodeURIComponent(id)}`);
+  if (res.ok) showDetail(await res.json());
+}
+
+function showDetail(t) {
+  if (state.panelView === 'list' && !$('list-view').hidden) state.listScroll = $('list-view').scrollTop;
+  state.panelView = 'detail';
+  $('list-view').hidden = true; $('detail-view').hidden = false;
+  $('back-btn').hidden = false; $('refresh-btn').hidden = true; $('panel-title').hidden = true;
+
+  const total = Math.max(t.latency_ms || 0, ...t.spans.map((s) => s.start_ms + s.duration_ms), 1);
+  const tag = (k, v) => `<span class="tag">${k} <b>${v}</b></span>`;
+  const spans = t.spans.map((s, i) => {
+    const left = (s.start_ms / total) * 100, width = (s.duration_ms / total) * 100;
+    const ttftPct = s.kind === 'llm' && s.ttft_ms != null && s.duration_ms ? Math.min(100, (s.ttft_ms / s.duration_ms) * 100) : 0;
+    const u = s.usage || {};
+    const tags = [tag('start', `+${fmtMs(s.start_ms)}`), tag('duration', fmtMs(s.duration_ms))];
+    if (s.kind === 'llm') {
+      tags.push(tag('TTFT', fmtMs(s.ttft_ms)));
+      tags.push(tag('tokens', `${fmtInt(u.prompt_tokens)} in · ${fmtInt(u.completion_tokens)} out`));
+    }
+    return `<details class="span"><summary>
+        <div class="sp-name"><span class="kind ${s.kind}">${s.kind}</span><span title="${esc(s.name)}">${esc(s.name)}</span></div>
+        <div class="track"><div class="bar ${s.kind} ${s.error ? 'error' : ''}" style="left:${left}%;width:${width}%">
+          ${ttftPct ? `<div class="ttft" style="width:${ttftPct}%"></div>` : ''}</div></div>
+        <div class="sp-dur">${fmtMs(s.duration_ms)}</div>
+      </summary><div class="sp-body">
+        <div class="tags">${tags.join('')}</div>
+        ${s.error ? `<div class="err-box">${esc(s.error)}</div>` : ''}
+        <details${s.kind === 'tool' ? ' open' : ''}><summary>Input</summary><pre class="json">${jsonHtml(s.input)}</pre></details>
+        <details open><summary>Output</summary><pre class="json">${jsonHtml(s.output)}</pre></details>
+      </div></details>`;
+  }).join('');
+
+  $('detail-view').innerHTML = `
+    <p class="td-q">${esc(t.question)}</p>
+    ${t.answer ? `<div class="td-a">${markdown(t.answer)}</div>` : ''}
+    <div class="td-meta">
+      ${tag('', esc(t.started_at.replace('T', ' ').slice(0, 19)))}${tag('id', esc(t.id))}${tag('model', esc(t.model))}
+      ${tag('latency', fmtMs(t.latency_ms))}${tag('TTFT', fmtMs(t.ttft_ms))}${tag('TPOT', fmtTpot(t.tpot_ms))}
+      ${tag('LLM calls', t.llm_calls)}${tag('tool calls', t.tool_calls)}
+      ${tag('tokens', `${fmtInt(t.prompt_tokens)} in · ${fmtInt(t.completion_tokens)} out`)}
+    </div>
+    ${t.error ? `<div class="err-box">${esc(t.error)}</div>` : ''}
+    <div class="legend"><span><i style="background:var(--llm)"></i>LLM call</span><span><i style="background:var(--llm-soft)"></i>waiting for first token</span>
+      <span><i style="background:var(--tool)"></i>tool call</span><span>Timeline: ${fmtMs(total)}</span></div>
+    ${spans || '<div class="empty-list">No spans.</div>'}`;
+  $('detail-view').scrollTop = 0;
+}
+</script>
+</body>
+</html>
